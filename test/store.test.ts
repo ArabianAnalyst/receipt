@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rmSync, existsSync, mkdtempSync } from "node:fs";
+import { rmSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GENESIS } from "../src/types.js";
@@ -39,4 +39,16 @@ test("JsonlStore persists one line per receipt and reloads", () => {
   assert.equal(j2.all()[0]!.id, "1");
   rmSync(dir, { recursive: true, force: true });
   assert.equal(existsSync(path), false);
+});
+
+test("JsonlStore throws on corrupt JSONL line with file and line number", () => {
+  const dir = mkdtempSync(join(tmpdir(), "receipt-"));
+  const path = join(dir, "chain.jsonl");
+  writeFileSync(path, JSON.stringify(rec("1", GENESIS)) + "\n" + '{"id":"r2","ts":');
+  assert.throws(
+    () => new JsonlStore(path),
+    /corrupt line 2/,
+    "corrupt line should throw with line number"
+  );
+  rmSync(dir, { recursive: true, force: true });
 });

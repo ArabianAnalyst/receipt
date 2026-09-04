@@ -22,16 +22,23 @@ export class MemoryStore<P = unknown> implements Store<P> {
 
 /**
  * Append-only JSONL store, one receipt per line. Pass a path to persist and
- * reload across restarts; omit it for an in-memory store.
+ * reload across restarts; omit it for an in-memory store. A corrupt or
+ * partially-written line throws a clear error on construction rather than
+ * being silently skipped, so a damaged log is never shortened.
  */
 export class JsonlStore<P = unknown> extends MemoryStore<P> {
   constructor(private readonly path?: string) {
     super();
     if (path && existsSync(path)) {
-      this.records = readFileSync(path, "utf8")
-        .split("\n")
-        .filter(Boolean)
-        .map((l) => JSON.parse(l) as Receipt<P>);
+      const lines = readFileSync(path, "utf8").split("\n").filter(Boolean);
+      this.records = lines.map((l, idx) => {
+        try {
+          // No runtime shape check: malformed-but-parseable lines are caught later by verifyChain.
+          return JSON.parse(l) as Receipt<P>;
+        } catch (e) {
+          throw new Error(`JsonlStore: corrupt line ${idx + 1} in ${path}: ${(e as Error).message}`);
+        }
+      });
     }
   }
 
