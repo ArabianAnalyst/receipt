@@ -1,0 +1,58 @@
+{
+  "name": "@olurabian/receipt",
+  "version": "0.1.0",
+  "description": "The Deadlatch receipt. A zero-dependency, hash-chained, independently verifiable record envelope shared by Purse, blackbox and Tripwire.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "audit",
+    "tamper-evident",
+    "hash-chain",
+    "receipt",
+    "governance",
+    "deadlatch"
+  ],
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": "Oluwasegun Araba (ARABA)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ArabianAnalyst/receipt"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@lavamoat/allow-scripts": "^5.1.0",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "lavamoat": {
+    "allowScripts": {
+      "tsx>esbuild#0.28.2": true
+    }
+  }
+}
