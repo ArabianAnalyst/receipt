@@ -3,3 +3,5 @@ export type { Receipt, ReceiptInput, Store, VerifyResult, MakeOptions } from "./
 export { canonicalize, hashRecord, verifyChain } from "./hash.js";
 export { makeReceipt } from "./chain.js";
 export { MemoryStore, JsonlStore } from "./store.js";
+export { PostgresStore, schema } from "./postgres.js";
+export type { SqlClient, PostgresStoreOptions } from "./postgres.js";
