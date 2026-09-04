@@ -81,3 +81,20 @@ test("verifyChain reports a reordered chain at index 0", () => {
   assert.equal(r.ok, false);
   assert.equal(r.brokenAt, 0);
 });
+
+test("verifyChain reports an inserted receipt", () => {
+  const c = chain(3);
+  const extraRest = {
+    id: "id-extra",
+    ts: "2026-09-04T00:00:00.000Z",
+    kind: "action",
+    payload: { i: 99 },
+    prevHash: c[1]!.hash,
+  };
+  const extra: Receipt = { ...extraRest, hash: hashRecord(extraRest) };
+  const spliced = [c[0]!, c[1]!, extra, c[2]!];
+  const r = verifyChain(spliced);
+  assert.equal(r.ok, false);
+  assert.equal(r.brokenAt, 3);
+  assert.equal(r.id, "id-3");
+});

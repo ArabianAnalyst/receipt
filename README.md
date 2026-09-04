@@ -6,6 +6,8 @@ The Deadlatch receipt. A zero-dependency, hash-chained record envelope that a th
 npm i @olurabian/receipt
 ```
 
+This package is ESM only and needs Node 18 or newer. Use `import`, not `require`.
+
 ```ts
 import { makeReceipt, verifyChain, JsonlStore } from "@olurabian/receipt";
 
@@ -17,6 +19,28 @@ verifyChain(store.all()); // { ok: true }
 // { ok: false, brokenAt: 0, id: "…", reason: "hash mismatch (a record was altered)" }
 ```
 
+Truncation at the tail is the one edit a chain cannot detect on its own. That is what an outside witness anchoring the chain head is for.
+
+Verify a chain using nothing but `node:crypto` and `node:fs`, with no dependency on this package.
+
+```js
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+
+const receipts = JSON.parse(readFileSync("receipts.json", "utf8"));
+const sha256 = (s) => createHash("sha256").update(s).digest("hex");
+
+let prev = "0".repeat(64);
+let ok = true;
+receipts.forEach((r, i) => {
+  const { id, ts, kind, payload, prevHash, hash } = r;
+  const expect = sha256(JSON.stringify({ id, ts, kind, payload, prevHash }));
+  if (prevHash !== prev || hash !== expect) { console.log("broken at index", i, r.id); ok = false; }
+  prev = hash;
+});
+console.log("ok", ok);
+```
+
 ## The receipt
 
 ```ts
@@ -24,6 +48,15 @@ verifyChain(store.all()); // { ok: true }
 ```
 
 `hash = sha256( JSON.stringify({ id, ts, kind, payload, prevHash }) )` in exactly that key order. `prevHash` of the first receipt is 64 zeros. That is the whole spec. Match it byte for byte in any language and you can verify a Deadlatch chain with nothing from us.
+
+Receipts are produced by JavaScript's `JSON.stringify`, so a verifier written in another language must match its exact conventions.
+
+- No whitespace
+- UTF-8 output, non-ASCII characters left unescaped
+- Only control characters, quotes, backslashes, and lone surrogates escaped
+- JavaScript's key ordering, where integer-like keys sort first in numeric order
+
+Python's default `json.dumps` differs on two of these. It adds whitespace after separators, and it escapes non-ASCII characters unless `ensure_ascii=False` is set.
 
 `verifyChain` walks the chain and reports the index and id of the first receipt that fails, and why.
 
