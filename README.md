@@ -56,7 +56,7 @@ makeReceipt(store, { kind: "decision", payload: { status: "allowed" } });
 await store.flush(); // resolves once the receipt is durable
 ```
 
-With Neon, replace the pool with `new Pool({ connectionString })` from `@neondatabase/serverless`. With postgres.js, wrap it once:
+With Neon, replace the pool with `new Pool({ connectionString })` from `@neondatabase/serverless`. With postgres.js, wrap it once.
 
 ```js
 const client = { query: (text, params = []) => sql.unsafe(text, params).then((rows) => ({ rows })) };
