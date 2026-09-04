@@ -41,6 +41,35 @@ receipts.forEach((r, i) => {
 console.log("ok", ok);
 ```
 
+## Postgres
+
+For real deployments, `PostgresStore` keeps the same synchronous `Store` interface and writes every receipt through to Postgres in order. It takes any client with a `query(text, params)` method, so the package stays dependency free. `pg`, Neon's serverless driver, and PGlite work as they are.
+
+```js
+import pg from "pg";
+import { PostgresStore, makeReceipt } from "@olurabian/receipt";
+
+const client = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const store = await PostgresStore.open(client, { stream: "purse" });
+
+makeReceipt(store, { kind: "decision", payload: { status: "allowed" } });
+await store.flush(); // resolves once the receipt is durable
+```
+
+With Neon, replace the pool with `new Pool({ connectionString })` from `@neondatabase/serverless`. With postgres.js, wrap it once:
+
+```js
+const client = { query: (text, params = []) => sql.unsafe(text, params).then((rows) => ({ rows })) };
+```
+
+What `open` does. It creates the table if it is missing, loads the stream in order, verifies the chain, and refuses to start on a broken one. One table holds many streams, one per product.
+
+One writer per stream. The table has a unique constraint on the previous hash, so a second process appending on the same head is rejected by the database rather than corrupting the chain. Run one writer per stream.
+
+Degraded means stopped. A transient insert failure is retried three times. A hard failure, including a rejected fork, latches the store. After that `append()` throws, `flush()` rejects, and `pending()` reports the backlog. Fix the database and restart the process, and `open` reloads and re-verifies.
+
+Reload reads the canonical text. Postgres reorders keys inside `jsonb`, which would break the hash on reload, so the store keeps the exact receipt text in a `record` column and uses `payload` only for SQL queries.
+
 ## The receipt
 
 ```ts

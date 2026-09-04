@@ -1,6 +1,6 @@
 {
   "name": "@olurabian/receipt",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The Deadlatch receipt. A zero-dependency, hash-chained, independently verifiable record envelope shared by Purse, blackbox and Tripwire.",
   "type": "module",
   "main": "./dist/index.js",
