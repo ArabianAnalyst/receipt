@@ -30,15 +30,18 @@ export class JsonlStore<P = unknown> extends MemoryStore<P> {
   constructor(private readonly path?: string) {
     super();
     if (path && existsSync(path)) {
-      const lines = readFileSync(path, "utf8").split("\n").filter(Boolean);
-      this.records = lines.map((l, idx) => {
+      const lines = readFileSync(path, "utf8").split("\n");
+      const records: Receipt<P>[] = [];
+      lines.forEach((line, i) => {
+        if (line.trim() === "") return;          // blank or trailing newline: skip, but the index still counts
         try {
           // No runtime shape check: malformed-but-parseable lines are caught later by verifyChain.
-          return JSON.parse(l) as Receipt<P>;
+          records.push(JSON.parse(line) as Receipt<P>);
         } catch (e) {
-          throw new Error(`JsonlStore: corrupt line ${idx + 1} in ${path}: ${(e as Error).message}`);
+          throw new Error(`JsonlStore: corrupt line ${i + 1} in ${path}: ${(e as Error).message}`);
         }
       });
+      this.records = records;
     }
   }
 

@@ -52,3 +52,15 @@ test("JsonlStore throws on corrupt JSONL line with file and line number", () => 
   );
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("JsonlStore line numbering counts blank lines", () => {
+  const dir = mkdtempSync(join(tmpdir(), "receipt-"));
+  const path = join(dir, "chain.jsonl");
+  writeFileSync(path, JSON.stringify(rec("1", GENESIS)) + "\n\n" + '{"id":"r3","ts":');
+  assert.throws(
+    () => new JsonlStore(path),
+    /corrupt line 3/,
+    "corrupt line after blank line should report correct line number"
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
