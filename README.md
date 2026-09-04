@@ -43,7 +43,7 @@ console.log("ok", ok);
 
 ## Postgres
 
-For real deployments, `PostgresStore` keeps the same synchronous `Store` interface and writes every receipt through to Postgres in order. It takes any client with a `query(text, params)` method, so the package stays dependency free. `pg`, Neon's serverless driver, and PGlite work as they are.
+For real deployments, `PostgresStore` keeps the same synchronous `Store` interface and writes every receipt through to Postgres in order. It takes any client with a `query(text, params)` method, so the package stays dependency free. `pg` and PGlite work as they are. Neon works over its `Pool`, or over HTTP when you ask for full results.
 
 ```js
 import pg from "pg";
@@ -56,7 +56,17 @@ makeReceipt(store, { kind: "decision", payload: { status: "allowed" } });
 await store.flush(); // resolves once the receipt is durable
 ```
 
-With Neon, replace the pool with `new Pool({ connectionString })` from `@neondatabase/serverless`. With postgres.js, wrap it once.
+```js
+// Neon over WebSockets. On Node 18 also set neonConfig.webSocketConstructor = ws.
+import { Pool } from "@neondatabase/serverless";
+const client = new Pool({ connectionString: process.env.DATABASE_URL });
+
+// Neon over HTTP
+import { neon } from "@neondatabase/serverless";
+const client = neon(process.env.DATABASE_URL, { fullResults: true });
+```
+
+With postgres.js, wrap it once.
 
 ```js
 const client = { query: (text, params = []) => sql.unsafe(text, params).then((rows) => ({ rows })) };
@@ -66,9 +76,13 @@ What `open` does. It creates the table if it is missing, loads the stream in ord
 
 One writer per stream. The table has a unique constraint on the previous hash, so a second process appending on the same head is rejected by the database rather than corrupting the chain. Run one writer per stream.
 
-Degraded means stopped. A transient insert failure is retried three times. A hard failure, including a rejected fork, latches the store. After that `append()` throws, `flush()` rejects, and `pending()` reports the backlog. Fix the database and restart the process, and `open` reloads and re-verifies.
+Degraded means stopped. A transient insert failure is retried three times. A hard failure, including a rejected fork, latches the store. After that `append()` throws, `flush()` rejects, and `pending()` reports the backlog. Fix the database and restart the process, and `open` reloads and re-verifies. Read `degraded()` for the error. The constraint name tells you what happened. `_stream_prev_hash_key` is a fork, another writer landed on the same head. `_stream_id_key` is your own write, the insert committed but the reply was lost, and a restart reloads it cleanly. The whole stream is held in memory, so memory and start-up time grow with the stream.
 
 Reload reads the canonical text. Postgres reorders keys inside `jsonb`, which would break the hash on reload, so the store keeps the exact receipt text in a `record` column and uses `payload` only for SQL queries.
+
+Only `record` is covered by the hash. A SQL query over `payload` is convenience, not evidence. Someone with write access to the table can change `payload` without touching the chain. Verify with `PostgresStore.open()` or `verifyChain` before you rely on a number you read with SQL.
+
+What is durable when. `append()` returns before the insert commits. If the process dies before the queued inserts land, everything `pending()` counts is lost, and nothing else. What remains in Postgres still verifies, because the loss is a tail. A crash and a deliberate truncation look the same to a verifier, so anchor the chain head if that matters to you. The JSONL store has a smaller window, one synchronous write, but it cannot survive the machine and cannot reject a fork. Wait on `flush()` whenever you need the guarantee.
 
 ## The receipt
 

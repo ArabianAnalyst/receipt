@@ -26,6 +26,7 @@ test("append then reopen continues the chain and verifies", async () => {
   assert.equal(s1.pending(), 2);
   await s1.flush();
   assert.equal(s1.pending(), 0);
+  assert.equal(s1.degraded(), null);
   const s2 = await PostgresStore.open<{ n: number }>(db, { stream: "t" });
   assert.equal(s2.all().length, 2);
   assert.equal(s2.lastHash(), s1.lastHash());
@@ -129,4 +130,68 @@ test("flush resolves only after the last insert", async () => {
   assert.equal(maxInFlight, 1);
   const { rows } = await db.query(`SELECT count(*)::int AS c FROM receipts`);
   assert.equal((rows[0] as { c: number }).c, 5);
+});
+
+test("flush covers appends made while waiting", async () => {
+  const db = new PGlite();
+  const delayed: SqlClient = {
+    query: async (text, params) => {
+      if (text.startsWith("INSERT")) await new Promise((r) => setTimeout(r, 30));
+      return db.query(text, params as unknown[]);
+    },
+  };
+  const s = await PostgresStore.open<number>(delayed, { stream: "t" });
+  const opts = fixed();
+  makeReceipt(s, { kind: "x", payload: 1 }, opts);
+  const p = s.flush();
+  makeReceipt(s, { kind: "x", payload: 2 }, opts);
+  await p;
+  assert.equal(s.pending(), 0);
+  const { rows } = await db.query(`SELECT count(*)::int AS c FROM receipts WHERE stream = $1`, ["t"]);
+  assert.equal((rows[0] as { c: number }).c, 2);
+});
+
+test("a driver that rejects with null latches instead of crashing", async () => {
+  const db = new PGlite();
+  const nullFail: SqlClient = {
+    query: async (text, params) => {
+      if (text.startsWith("INSERT")) return Promise.reject(null);
+      return db.query(text, params as unknown[]);
+    },
+  };
+  const s = await PostgresStore.open<number>(nullFail, { stream: "t", retries: 0, backoffMs: [0] });
+  const captured: unknown[] = [];
+  const onUnhandled = (reason: unknown) => captured.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  makeReceipt(s, { kind: "x", payload: 1 }, fixed());
+  await assert.rejects(s.flush(), /degraded/);
+  await new Promise((r) => setImmediate(r));
+  process.off("unhandledRejection", onUnhandled);
+  assert.equal(captured.length, 0);
+  assert.ok(s.degraded());
+});
+
+test("a permanent SQL error latches on the first attempt", async () => {
+  const db = new PGlite();
+  let attempts = 0;
+  const permanentFail: SqlClient = {
+    query: async (text, params) => {
+      if (text.startsWith("INSERT")) {
+        attempts++;
+        throw Object.assign(new Error("relation missing"), { code: "42P01" });
+      }
+      return db.query(text, params as unknown[]);
+    },
+  };
+  const s = await PostgresStore.open<number>(permanentFail, { stream: "t", retries: 3, backoffMs: [0, 0, 0] });
+  makeReceipt(s, { kind: "x", payload: 1 }, fixed());
+  await assert.rejects(s.flush(), /degraded/);
+  assert.equal(attempts, 1);
+});
+
+test("open with migrate:false on a missing table names the table and stream", async () => {
+  await assert.rejects(
+    PostgresStore.open(new PGlite(), { stream: "t", migrate: false }),
+    /cannot read table "receipts" for stream "t"/,
+  );
 });

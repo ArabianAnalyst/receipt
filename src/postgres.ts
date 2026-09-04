@@ -24,7 +24,8 @@ const IDENT = /^[a-z_][a-z0-9_]*$/;
 
 /** The schema, as executed by open(). Exposed so operators can run it themselves. */
 export function schema(table = "receipts"): string[] {
-  if (!IDENT.test(table)) throw new Error(`PostgresStore: invalid table name "${table}"`);
+  if (!IDENT.test(table) || table.length > 63)
+    throw new Error(`PostgresStore: invalid table name "${table}" (letters, digits, underscores, max 63)`);
   return [
     `CREATE TABLE IF NOT EXISTS ${table} (
   seq BIGSERIAL PRIMARY KEY,
@@ -65,7 +66,8 @@ export class PostgresStore<P = unknown> implements Store<P> {
   private constructor(private readonly client: SqlClient, opts: PostgresStoreOptions) {
     this.stream = opts.stream ?? "default";
     this.table = opts.table ?? "receipts";
-    if (!IDENT.test(this.table)) throw new Error(`PostgresStore: invalid table name "${this.table}"`);
+    if (!IDENT.test(this.table) || this.table.length > 63)
+      throw new Error(`PostgresStore: invalid table name "${this.table}" (letters, digits, underscores, max 63)`);
     this.retries = opts.retries ?? 3;
     this.backoffMs = opts.backoffMs ?? [100, 400, 1600];
   }
@@ -76,8 +78,14 @@ export class PostgresStore<P = unknown> implements Store<P> {
     if (opts.migrate ?? true) {
       for (const stmt of schema(store.table)) await client.query(stmt);
     }
-    const { rows } = await client.query(`SELECT record FROM ${store.table} WHERE stream = $1 ORDER BY seq`, [store.stream]);
-    store.records = rows.map((r) => JSON.parse(String(r.record)) as Receipt<P>);
+    let loaded: { rows: Record<string, unknown>[] };
+    try {
+      loaded = await client.query(`SELECT record FROM ${store.table} WHERE stream = $1 ORDER BY seq`, [store.stream]);
+    } catch (e) {
+      const message = String((e as { message?: unknown } | null)?.message ?? e);
+      throw new Error(`PostgresStore: cannot read table "${store.table}" for stream "${store.stream}": ${message}`);
+    }
+    store.records = loaded.rows.map((r) => JSON.parse(String(r.record)) as Receipt<P>);
     const v = verifyChain(store.records);
     if (!v.ok) {
       throw new Error(`PostgresStore: stream "${store.stream}" fails verification at index ${v.brokenAt} (${v.reason})`);
@@ -94,7 +102,7 @@ export class PostgresStore<P = unknown> implements Store<P> {
     if (this.latched) throw new Error(`PostgresStore: degraded, ${this.latched.message}`);
     this.records.push(rec);
     this.queue.push(rec);
-    this.chain = this.chain.then(() => this.insert(rec));
+    this.chain = this.chain.then(() => this.insert(rec)).catch(() => undefined);
   }
 
   all(): Receipt<P>[] {
@@ -106,9 +114,18 @@ export class PostgresStore<P = unknown> implements Store<P> {
     return this.queue.length;
   }
 
-  /** Resolves when every queued append is durable. Rejects with the latched error. */
+  /** The latched error, or null while the store is healthy. */
+  degraded(): Error | null {
+    return this.latched;
+  }
+
+  /** Resolves when every queued append is durable, including appends made while waiting. Rejects with the latched error. */
   async flush(): Promise<void> {
-    await this.chain;
+    for (;;) {
+      const chain = this.chain;
+      await chain;
+      if (chain === this.chain) break;
+    }
     if (this.latched) throw new Error(`PostgresStore: degraded, ${this.latched.message}`);
   }
 
@@ -116,20 +133,28 @@ export class PostgresStore<P = unknown> implements Store<P> {
     if (this.latched) return;
     const sql = `INSERT INTO ${this.table} (stream, id, ts, kind, prev_hash, hash, payload, record) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`;
     const params = [this.stream, rec.id, rec.ts, rec.kind, rec.prevHash, rec.hash, JSON.stringify(rec.payload), JSON.stringify(rec)];
-    for (let attempt = 0; ; attempt++) {
-      try {
-        await this.client.query(sql, params);
-        this.queue.shift();
-        return;
-      } catch (e) {
-        const err = e as Error & { code?: string };
-        const unique = err.code === "23505" || /unique constraint/i.test(err.message);
-        if (unique || attempt >= this.retries) {
-          this.latched = new Error(`insert of receipt ${rec.id} failed after ${attempt + 1} attempt(s): ${err.message}`);
+    try {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await this.client.query(sql, params);
+          this.queue.shift();
           return;
+        } catch (e) {
+          const err = (e ?? {}) as { code?: string; message?: string };
+          const message = String(err.message ?? e);
+          // Integrity (23), syntax and access (42), and auth (28) errors are permanent,
+          // so they latch on the first attempt; anything else is treated as transient and retried.
+          const code = String(err.code ?? "");
+          const hard = code === "23505" || /^(23|42|28)/.test(code) || /unique constraint/i.test(message);
+          if (hard || attempt >= this.retries) {
+            this.latched = new Error(`insert of receipt ${rec.id} failed after ${attempt + 1} attempt(s): ${message}`);
+            return;
+          }
+          await sleep(this.backoffMs[Math.min(attempt, this.backoffMs.length - 1)] ?? 0);
         }
-        await sleep(this.backoffMs[Math.min(attempt, this.backoffMs.length - 1)] ?? 0);
       }
+    } catch (e) {
+      this.latched = new Error(`insert of receipt ${rec.id} failed: ${String((e as { message?: unknown } | null)?.message ?? e)}`);
     }
   }
 }
