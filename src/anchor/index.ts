@@ -7,3 +7,4 @@ export type { ParsedCheckpoint, CheckpointSignature, CheckpointResult } from "./
 export { P256Signer, verifyArtifactSignature } from "./signer.js";
 export { KEY_DETAILS, decodeBody, buildRequest } from "./body.js";
 export type { HashedRekordBody, RekorRequest } from "./body.js";
+export { verifyAnchorProof, verifyAnchored } from "./verify.js";
