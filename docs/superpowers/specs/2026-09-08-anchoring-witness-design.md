@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS anchors (
 
 `record` is the canonical Anchor JSON, read back verbatim. Append-only by contract; nothing in the package updates or deletes.
 
-**CLI.** `bin/receipt-verify.js`, exposed as `receipt-verify`: `receipt-verify <chain.json|chain.jsonl> --anchors <anchors.json | witness url> --log-key <origin>=<base64 DER> --witness-key <base64 DER>` prints the `AnchoredVerifyResult` as JSON and exits non-zero unless `ok`. When `--anchors` is a URL it fetches `<url>/anchors`. No interactive mode.
+**CLI.** `bin/receipt-verify.js`, exposed as `receipt-verify`: `receipt-verify <chain.json|chain.jsonl> --anchors <anchors.json | witness url> --log-key <origin>=<base64 DER> --witness-key <base64 DER>` prints the `AnchoredVerifyResult` as JSON and exits 0 only when `ok` is true and at least one anchor verified, 1 when the chain or an anchor fails or nothing was anchored (with one line on stderr saying so), and 2 on a usage or read error. When `--anchors` is a URL it fetches `<url>/anchors`. No interactive mode.
 
 ## The witness
 
