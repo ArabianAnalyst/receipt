@@ -1,0 +1,15 @@
+{
+  "source": "sigstore/root-signing targets/trusted_root.json, fetched 2026-09-08",
+  "baseUrl": "https://log2025-1.rekor.sigstore.dev",
+  "hashAlgorithm": "SHA2_256",
+  "publicKey": {
+    "rawBytes": "MCowBQYDK2VwAyEAt8rlp1knGwjfbcXAYPYAkn0XiLz1x8O4t0YkEhie244=",
+    "keyDetails": "PKIX_ED25519",
+    "validFor": {
+      "start": "2025-09-23T00:00:00Z"
+    }
+  },
+  "logId": {
+    "keyId": "zxGZFVvd0FEmjR8WrFwMdcAJ9vtaY/QXf44Y1wUeP6A="
+  }
+}
