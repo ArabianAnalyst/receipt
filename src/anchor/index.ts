@@ -8,3 +8,5 @@ export { P256Signer, verifyArtifactSignature } from "./signer.js";
 export { KEY_DETAILS, decodeBody, buildRequest } from "./body.js";
 export type { HashedRekordBody, RekorRequest } from "./body.js";
 export { verifyAnchorProof, verifyAnchored } from "./verify.js";
+export { RekorV2 } from "./rekor.js";
+export type { RekorV2Options } from "./rekor.js";
