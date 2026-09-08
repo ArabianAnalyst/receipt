@@ -52,7 +52,12 @@ export class RekorV2 {
     if (res.status !== 201 && res.status !== 200) {
       throw new Error(`rekor: ${res.status} ${(await res.text()).slice(0, 200)}`);
     }
-    const reply = (await res.json()) as EntryReply;
+    let reply: EntryReply;
+    try {
+      reply = (await res.json()) as EntryReply;
+    } catch {
+      throw new Error("rekor: reply is not JSON");
+    }
     const p = reply.inclusionProof;
     if (!reply.logIndex || !reply.logId?.keyId || !reply.canonicalizedBody || !p?.logIndex || !p.treeSize || !p.rootHash || !p.hashes || !p.checkpoint?.envelope) {
       throw new Error("rekor: reply is missing fields");

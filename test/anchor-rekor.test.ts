@@ -46,6 +46,24 @@ test("the constructor rejects a url without a scheme", () => {
   assert.throws(() => new RekorV2({ url: "log.example", logKeys: [] }), /http/);
 });
 
+test("submit rejects when the log does not answer within timeoutMs", async () => {
+  const hanging = (async (_input: unknown, init?: { signal?: AbortSignal }) => {
+    const controller = new AbortController();
+    init?.signal?.addEventListener("abort", () => controller.abort(init.signal.reason));
+    return new Promise<Response>((_resolve, reject) => {
+      setTimeout(() => reject(new DOMException("test timeout", "TimeoutError")), 50);
+    });
+  }) as unknown as typeof fetch;
+  const rekor = new RekorV2({ url: "https://x.test", logKeys: [], fetch: hanging, timeoutMs: 100 });
+  await assert.rejects(rekor.submit("purse", 0, "c".repeat(64), P256Signer.generate()), (e: unknown) => (e as Error).name === "TimeoutError");
+});
+
+test("submit refuses a reply that is not JSON", async () => {
+  const bad = (async () => new Response("<html>", { status: 201 })) as unknown as typeof fetch;
+  const rekor = new RekorV2({ url: "https://x.test", logKeys: [], fetch: bad });
+  await assert.rejects(rekor.submit("purse", 0, "c".repeat(64), P256Signer.generate()), /rekor: reply is not JSON/);
+});
+
 test("live: the public log accepts a throwaway anchor and the reply verifies under the pinned key", { skip: process.env.REKOR_LIVE !== "1" }, async () => {
   const rekor = new RekorV2({ url: "https://log2025-1.rekor.sigstore.dev", logKeys: [fixtureLogKey], timeoutMs: 30000 });
   const head = randomBytes(32).toString("hex");
