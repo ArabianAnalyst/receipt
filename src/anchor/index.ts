@@ -10,3 +10,4 @@ export type { HashedRekordBody, RekorRequest } from "./body.js";
 export { verifyAnchorProof, verifyAnchored } from "./verify.js";
 export { RekorV2 } from "./rekor.js";
 export type { RekorV2Options } from "./rekor.js";
+export { MemoryAnchorStore, PostgresAnchorStore, anchorSchema } from "./store.js";
