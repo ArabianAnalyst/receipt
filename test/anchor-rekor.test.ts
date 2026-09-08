@@ -47,15 +47,24 @@ test("the constructor rejects a url without a scheme", () => {
 });
 
 test("submit rejects when the log does not answer within timeoutMs", async () => {
-  const hanging = (async (_input: unknown, init?: { signal?: AbortSignal }) => {
-    const controller = new AbortController();
-    init?.signal?.addEventListener("abort", () => controller.abort(init.signal.reason));
+  let seen: AbortSignal | undefined;
+  const hanging = ((_input: unknown, init?: { signal?: AbortSignal }) => {
+    seen = init?.signal;
     return new Promise<Response>((_resolve, reject) => {
-      setTimeout(() => reject(new DOMException("test timeout", "TimeoutError")), 50);
+      init?.signal?.addEventListener("abort", () => reject(init.signal!.reason as Error));
     });
   }) as unknown as typeof fetch;
-  const rekor = new RekorV2({ url: "https://x.test", logKeys: [], fetch: hanging, timeoutMs: 100 });
-  await assert.rejects(rekor.submit("purse", 0, "c".repeat(64), P256Signer.generate()), (e: unknown) => (e as Error).name === "TimeoutError");
+  const keepAlive = setTimeout(() => {}, 5000); // AbortSignal.timeout's own timer is unref'd; hold the loop open until it fires
+  try {
+    const rekor = new RekorV2({ url: "https://x.test", logKeys: [], fetch: hanging, timeoutMs: 100 });
+    await assert.rejects(
+      rekor.submit("purse", 0, "c".repeat(64), P256Signer.generate()),
+      (e: unknown) => ["TimeoutError", "AbortError"].includes((e as Error).name),
+    );
+  } finally {
+    clearTimeout(keepAlive);
+  }
+  assert.ok(seen instanceof AbortSignal, "fetch received the abort signal");
 });
 
 test("submit refuses a reply that is not JSON", async () => {
