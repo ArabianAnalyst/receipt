@@ -4,3 +4,6 @@ export { ARTIFACT_PREFIX, artifactOf, digestOf } from "./artifact.js";
 export { leafHashOf, nodeHashOf, verifyInclusionPath, verifyInclusion } from "./merkle.js";
 export { parseCheckpoint, ed25519RawFromSpki, checkpointKeyId, verifyCheckpoint } from "./checkpoint.js";
 export type { ParsedCheckpoint, CheckpointSignature, CheckpointResult } from "./checkpoint.js";
+export { P256Signer, verifyArtifactSignature } from "./signer.js";
+export { KEY_DETAILS, decodeBody, buildRequest } from "./body.js";
+export type { HashedRekordBody, RekorRequest } from "./body.js";
