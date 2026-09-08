@@ -17,13 +17,15 @@ blackbox's minor follows the second plan as a one-task change.
 
 ## What the verifier promises
 
-`verifyAnchored(records, anchors, trust)` is pure. For each anchor it checks, in order:
+`verifyAnchored(records, anchors, trust, opts?: { stream?: string })` is pure. For each anchor it checks, in order:
 
 1. The witness signature over the anchored artifact, under the witness key carried in the anchor.
 2. The Rekor entry body decodes to a hashedrekord whose digest is the artifact's digest and whose verifier key is that same witness key.
 3. The Merkle inclusion of the body's leaf hash against the proof's root hash and tree size.
 4. The checkpoint's signature by a log key the caller trusts, with the checkpoint's root and size equal to the proof's.
 5. The chain: `records[anchor.seq].hash` equals `anchor.head`.
+
+When the caller names a stream in `opts.stream`, each anchor's own `stream` is checked against it before step 5, and without a named stream every anchor must agree on one stream or all of them fail.
 
 Then it runs `verifyChain` over the records. The result:
 
@@ -33,6 +35,7 @@ interface AnchoredVerifyResult {
   coveredUpTo: number | null;        // highest anchored seq that verified, null when none
   anchors: { seq: number; ok: boolean; reason?: string; logIndex: string; cosigned: string[] }[];
   chain: VerifyResult;
+  stream: string | null;             // opts.stream, or the anchors' shared stream, null when there are none
 }
 ```
 
@@ -73,7 +76,7 @@ Nothing in it is secret. Anchors are published in full.
 
 ## Rekor v2, as observed
 
-Captured from a real submission on 2026-09-08 (fixture `test/fixtures/rekor-v2/probe-entry.json`, a throwaway key and a random head, log index 101286719 on `log2025-1.rekor.sigstore.dev`).
+Captured from a real submission on 2026-09-08 (fixture `test/fixtures/rekor-v2/fixture-entry.json`, a throwaway key and a random head, log index 101306751 on `log2025-1.rekor.sigstore.dev`).
 
 - Write: `POST {REKOR_URL}/api/v2/log/entries`, JSON `{ hashedRekordRequestV002: { digest, signature: { content, verifier: { keyDetails: "PKIX_ECDSA_P256_SHA_256", publicKey: { rawBytes } } } } }`, all base64. Reply 201 in about six seconds. Clients set a timeout of at least twenty seconds.
 - Reply: `logIndex` (decimal string), `logId.keyId` (base64, 32 bytes), `kindVersion { kind: "hashedrekord", version: "0.0.2" }`, `integratedTime: "0"` (always, ignore), `inclusionProof { logIndex, rootHash, treeSize, hashes[], checkpoint { envelope } }`, `canonicalizedBody` (base64 of the JSON body). No inclusion promise, no signed entry timestamp.
@@ -90,10 +93,10 @@ Zero dependencies. `node:crypto` for SHA-256, ECDSA P-256, and Ed25519. Global `
 ```ts
 export type { Anchor, AnchorTrust, AnchoredVerifyResult, InclusionProof };
 export interface AnchorTrust { logKeys: { origin: string; publicKey: string }[]; witnessKeys: string[] }  // base64 SPKI DER
-export function verifyAnchored(records: ReadonlyArray<Receipt>, anchors: ReadonlyArray<Anchor>, trust: AnchorTrust): AnchoredVerifyResult;
+export function verifyAnchored(records: ReadonlyArray<Receipt>, anchors: ReadonlyArray<Anchor>, trust: AnchorTrust, opts?: { stream?: string }): AnchoredVerifyResult;
 export function artifactOf(stream: string, seq: number, head: string): Uint8Array;
-export function leafHashOf(canonicalizedBody: Uint8Array): string;                       // hex
-export function verifyInclusion(leafHash: string, proof: InclusionProof): boolean;
+export function leafHashOf(data: Uint8Array): Uint8Array;
+export function verifyInclusion(leafHash: Uint8Array, proof: InclusionProof): boolean;
 export function verifyCheckpoint(note: string, logKeys: AnchorTrust["logKeys"]): { ok: boolean; origin: string; size: string; root: string; signedBy?: string; cosigned: string[] };
 export function checkpointKeyId(origin: string, publicKeyDer: Uint8Array): string;      // base64, C2SP
 export class P256Signer { static generate(): P256Signer; static fromPem(pem: string): P256Signer; toPem(): string; publicKeyDer(): string; sign(bytes: Uint8Array): string }
@@ -106,6 +109,17 @@ export const KEY_DETAILS: "PKIX_ECDSA_P256_SHA_256";
 export interface AnchorStore { append(a: Anchor): Promise<void>; list(stream: string, sinceSeq?: number): Promise<Anchor[]>; last(stream: string): Promise<Anchor | null> }
 export class MemoryAnchorStore implements AnchorStore {}
 export class PostgresAnchorStore implements AnchorStore { constructor(client: SqlClient, opts?: { table?: string }); open(): Promise<void> }
+export const ARTIFACT_PREFIX = "deadlatch-anchor-v1";
+export function digestOf(artifact: Uint8Array): Uint8Array;
+export function nodeHashOf(left: Uint8Array, right: Uint8Array): Uint8Array;
+export function verifyInclusionPath(leafHash: Uint8Array, index: bigint, size: bigint, path: ReadonlyArray<Uint8Array>, root: Uint8Array): boolean;
+export function parseCheckpoint(note: string): ParsedCheckpoint;
+export function ed25519RawFromSpki(der: Uint8Array): Uint8Array | null;
+export function anchorSchema(table?: string): string[];
+export function toBase64(bytes: Uint8Array): string;
+export function fromBase64(s: string): Uint8Array;
+export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean;
+export function concat(...parts: Uint8Array[]): Uint8Array;
 ```
 
 `RekorV2.submit` verifies the reply itself with `verifyInclusion` and `verifyCheckpoint` before returning an `Anchor`; a reply that does not verify is an error, never an anchor. The package ships no log key. A verifier handed an anchor whose checkpoint no trusted key signs returns `ok: false` with `reason: "untrusted log key"`.

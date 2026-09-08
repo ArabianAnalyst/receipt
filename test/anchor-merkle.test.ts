@@ -31,6 +31,13 @@ test("out-of-range index and empty tree fail", () => {
   assert.ok(verifyInclusionPath(l0, 0n, 1n, [], l0), "single leaf is its own root");
 });
 
+test("a two-leaf tree proof with the wrong number of path elements fails", () => {
+  const l0 = leaf(0), l1 = leaf(1);
+  const root = nodeHashOf(l0, l1);
+  assert.ok(!verifyInclusionPath(l0, 0n, 2n, [l1, leaf(2), leaf(3)], root), "three path elements for a two-leaf tree");
+  assert.ok(!verifyInclusionPath(l0, 0n, 2n, [], root), "zero path elements for a two-leaf tree");
+});
+
 test("the real Rekor v2 fixture proof reaches its root", () => {
   const f = fixtureEntry();
   const p = f.response.inclusionProof;

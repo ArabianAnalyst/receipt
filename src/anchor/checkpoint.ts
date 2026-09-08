@@ -86,6 +86,7 @@ export function verifyCheckpoint(note: string, logKeys: ReadonlyArray<LogKey>): 
   const own = signatures.find((s) => s.name === origin);
   if (!own) return { ok: false, origin, size, root, cosigned, reason: "checkpoint: no signature by the origin" };
   const message = Buffer.from(text, "utf8");
+  let matchedPrefix = false;
   for (const k of logKeys) {
     if (k.origin !== origin) continue;
     const der = fromBase64(k.publicKey);
@@ -93,11 +94,12 @@ export function verifyCheckpoint(note: string, logKeys: ReadonlyArray<LogKey>): 
     try { keyId = checkpointKeyId(origin, der); }
     catch (e) { return { ok: false, origin, size, root, cosigned, reason: (e as Error).message }; }
     if (!bytesEqual(fromBase64(keyId).subarray(0, 4), own.keyId)) continue;
+    matchedPrefix = true;
     const key = createPublicKey({ key: Buffer.from(der), format: "der", type: "spki" });
     const good = cryptoVerify(null, message, key, own.signature);
-    return good
-      ? { ok: true, origin, size, root, keyId, signedBy: origin, cosigned }
-      : { ok: false, origin, size, root, keyId, cosigned, reason: "checkpoint: signature does not verify" };
+    if (good) return { ok: true, origin, size, root, keyId, signedBy: origin, cosigned };
   }
-  return { ok: false, origin, size, root, cosigned, reason: "untrusted log key" };
+  return matchedPrefix
+    ? { ok: false, origin, size, root, cosigned, reason: "checkpoint: signature does not verify" }
+    : { ok: false, origin, size, root, cosigned, reason: "untrusted log key" };
 }

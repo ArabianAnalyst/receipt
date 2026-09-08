@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { verifyAnchored, verifyAnchorProof } from "../src/anchor/verify.js";
 import { P256Signer } from "../src/anchor/signer.js";
 import { toBase64 } from "../src/anchor/bytes.js";
+import { artifactOf, digestOf } from "../src/anchor/artifact.js";
+import { buildRequest } from "../src/anchor/body.js";
 import type { Anchor, AnchorTrust } from "../src/anchor/types.js";
 import type { Receipt } from "../src/types.js";
 import { FakeLog } from "./helpers/fake-log.js";
@@ -125,4 +127,114 @@ test("verifyAnchored is pure", () => {
   const r2 = verifyAnchored(records, [a], trust);
   assert.deepEqual(r1, r2);
   assert.equal(JSON.stringify({ records, a, trust }), before);
+});
+
+test("a valid inclusion proof with a checkpoint from another tree size fails on root or size", () => {
+  const { log, signer, records, trust } = setup(6);
+  const good = anchorWith(log, signer, "purse", 2, records[2]!.hash);
+  // grow the log so the same entry can be re-proven against a bigger tree
+  anchorWith(log, signer, "purse", 3, records[3]!.hash);
+  anchorWith(log, signer, "purse", 4, records[4]!.hash);
+  const later = log.entry(Number(good.entry.logIndex));
+
+  // the inclusion proof still reaches good.proof.rootHash, but the checkpoint is for the bigger tree
+  const mixedCheckpoint: Anchor = { ...good, proof: { ...good.proof, checkpoint: later.inclusionProof.checkpoint.envelope } };
+  const r1 = verifyAnchored(records, [mixedCheckpoint], trust);
+  assert.equal(r1.anchors[0]?.reason, "checkpoint root or size differs from the proof");
+
+  // the mirror: keep good's checkpoint, but the inclusion proof now reaches the later root
+  const mixedProof: Anchor = {
+    ...good,
+    proof: { ...good.proof, hashes: later.inclusionProof.hashes, rootHash: later.inclusionProof.rootHash, treeSize: later.inclusionProof.treeSize },
+  };
+  const r2 = verifyAnchored(records, [mixedProof], trust);
+  assert.equal(r2.anchors[0]?.reason, "checkpoint root or size differs from the proof");
+});
+
+test("a break in the chain above coveredUpTo makes ok false while the anchor still stands", () => {
+  const { log, signer, records, trust } = setup(6);
+  const a2 = anchorWith(log, signer, "purse", 2, records[2]!.hash);
+  const mutated = records.map((r, i) => (i === 4 ? { ...r, payload: { ...(r.payload as { n: number }), n: 999 } } : r));
+  const r = verifyAnchored(mutated, [a2], trust);
+  assert.equal(r.chain.ok, false);
+  assert.equal(r.anchors[0]?.ok, true);
+  assert.equal(r.coveredUpTo, 2);
+  assert.equal(r.ok, false);
+});
+
+test("a log entry whose verifier key is not the witness key fails", () => {
+  const { log, signer, records, trust } = setup(3);
+  const other = P256Signer.generate();
+  const artifact = artifactOf("purse", 2, records[2]!.hash);
+  const signature = signer.sign(artifact);
+  const r = log.add(buildRequest(digestOf(artifact), signature, other.publicKeyDer()));
+  const a: Anchor = {
+    v: 1, stream: "purse", seq: 2, head: records[2]!.hash, at: "2026-09-08T00:00:00.000Z",
+    witness: { alg: "ecdsa-p256", publicKey: signer.publicKeyDer() },
+    signature,
+    log: { url: log.url, keyId: r.logId.keyId },
+    entry: { logIndex: r.logIndex, canonicalizedBody: r.canonicalizedBody },
+    proof: { logIndex: r.inclusionProof.logIndex, treeSize: r.inclusionProof.treeSize, rootHash: r.inclusionProof.rootHash, hashes: r.inclusionProof.hashes, checkpoint: r.inclusionProof.checkpoint.envelope },
+  };
+  const result = verifyAnchored(records, [a], trust);
+  assert.equal(result.anchors[0]?.reason, "log entry verifier key differs from the witness key");
+});
+
+test("a log entry whose signature differs from the anchor's fails", () => {
+  const { log, signer, records, trust } = setup(3);
+  const artifact = artifactOf("purse", 2, records[2]!.hash);
+  const sig1 = signer.sign(artifact);
+  const sig2 = signer.sign(artifact);
+  assert.notEqual(sig1, sig2, "ECDSA signatures are randomized, two signs of the same bytes differ");
+  const r = log.add(buildRequest(digestOf(artifact), sig1, signer.publicKeyDer()));
+  const a: Anchor = {
+    v: 1, stream: "purse", seq: 2, head: records[2]!.hash, at: "2026-09-08T00:00:00.000Z",
+    witness: { alg: "ecdsa-p256", publicKey: signer.publicKeyDer() },
+    signature: sig2,
+    log: { url: log.url, keyId: r.logId.keyId },
+    entry: { logIndex: r.logIndex, canonicalizedBody: r.canonicalizedBody },
+    proof: { logIndex: r.inclusionProof.logIndex, treeSize: r.inclusionProof.treeSize, rootHash: r.inclusionProof.rootHash, hashes: r.inclusionProof.hashes, checkpoint: r.inclusionProof.checkpoint.envelope },
+  };
+  const result = verifyAnchored(records, [a], trust);
+  assert.equal(result.anchors[0]?.reason, "log entry signature differs from the anchor signature");
+});
+
+test("an unsupported witness algorithm fails", () => {
+  const { log, signer, records, trust } = setup(3);
+  const good = anchorWith(log, signer, "purse", 2, records[2]!.hash);
+  const bad: Anchor = { ...good, witness: { ...good.witness, alg: "ed25519" as unknown as "ecdsa-p256" } };
+  assert.equal(verifyAnchorProof(bad, trust).reason, "unsupported witness algorithm");
+});
+
+test("a log index that differs between entry and proof fails", () => {
+  const { log, signer, records, trust } = setup(3);
+  const good = anchorWith(log, signer, "purse", 2, records[2]!.hash);
+  const bumped: Anchor = { ...good, entry: { ...good.entry, logIndex: String(Number(good.entry.logIndex) + 1) } };
+  assert.equal(verifyAnchorProof(bumped, trust).reason, "log index differs between entry and proof");
+});
+
+test("an anchor minted for another stream passes without opts.stream but fails once the caller names the chain's stream", () => {
+  const { log, signer, records, trust } = setup(3);
+  const a = anchorWith(log, signer, "other", 2, records[2]!.hash);
+  const noOpt = verifyAnchored(records, [a], trust);
+  assert.equal(noOpt.anchors[0]?.ok, true, noOpt.anchors[0]?.reason);
+  assert.equal(noOpt.stream, "other");
+  const withOpt = verifyAnchored(records, [a], trust, { stream: "purse" });
+  assert.equal(withOpt.anchors[0]?.reason, "anchor is for stream other, not purse");
+  assert.equal(withOpt.stream, "purse");
+});
+
+test("two anchors for two streams without opts.stream fail with the span reason", () => {
+  const { log, signer, records, trust } = setup(4);
+  const a1 = anchorWith(log, signer, "purse", 1, records[1]!.hash);
+  const a2 = anchorWith(log, signer, "other", 3, records[3]!.hash);
+  const r = verifyAnchored(records, [a1, a2], trust);
+  assert.equal(r.anchors[0]?.reason, "anchors span more than one stream");
+  assert.equal(r.anchors[1]?.reason, "anchors span more than one stream");
+  assert.equal(r.ok, false);
+});
+
+test("verifyAnchored reports stream null when there are no anchors and none was named", () => {
+  const { records, trust } = setup(2);
+  assert.equal(verifyAnchored(records, [], trust).stream, null);
 });

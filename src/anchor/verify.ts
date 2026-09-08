@@ -18,6 +18,7 @@ function fail(a: Anchor, reason: string, cosigned: string[] = []): AnchorCheck {
  */
 export function verifyAnchorProof(a: Anchor, trust: AnchorTrust): AnchorCheck {
   if (a.v !== 1) return fail(a, "unsupported anchor version");
+  if (a.entry.logIndex !== a.proof.logIndex) return fail(a, "log index differs between entry and proof");
   let artifact: Uint8Array;
   try { artifact = artifactOf(a.stream, a.seq, a.head); }
   catch (e) { return fail(a, (e as Error).message); }
@@ -41,12 +42,30 @@ export function verifyAnchorProof(a: Anchor, trust: AnchorTrust): AnchorCheck {
  * The full promise. Each anchor's proof, then the chain: the record at the
  * anchored position must carry the anchored head. `coveredUpTo` is the highest
  * seq an anchor vouched for; below it a rewrite or a truncation is named.
+ *
+ * `opts.stream`, when given, binds the check to that stream: an anchor minted
+ * for another stream fails before the record check. Without it, every anchor
+ * must agree on one stream or all of them fail; a single stream trivially
+ * agrees with itself.
  */
-export function verifyAnchored(records: ReadonlyArray<Receipt>, anchors: ReadonlyArray<Anchor>, trust: AnchorTrust): AnchoredVerifyResult {
+export function verifyAnchored(
+  records: ReadonlyArray<Receipt>,
+  anchors: ReadonlyArray<Anchor>,
+  trust: AnchorTrust,
+  opts?: { stream?: string },
+): AnchoredVerifyResult {
   const chain = verifyChain(records);
+  const streams = new Set(anchors.map((a) => a.stream));
+  const sharedStream = anchors.length > 0 && streams.size === 1 ? anchors[0]!.stream : null;
+  const spanning = !opts?.stream && anchors.length > 0 && streams.size > 1;
+  const stream = opts?.stream ?? sharedStream;
   const checks = anchors.map((a) => {
     const proof = verifyAnchorProof(a, trust);
     if (!proof.ok) return proof;
+    if (opts?.stream !== undefined && a.stream !== opts.stream) {
+      return fail(a, `anchor is for stream ${a.stream}, not ${opts.stream}`, proof.cosigned);
+    }
+    if (spanning) return fail(a, "anchors span more than one stream", proof.cosigned);
     const rec = records[a.seq];
     if (!rec) return fail(a, `record missing at seq ${a.seq}`, proof.cosigned);
     if (rec.hash !== a.head) return fail(a, `head mismatch at seq ${a.seq}`, proof.cosigned);
@@ -54,5 +73,5 @@ export function verifyAnchored(records: ReadonlyArray<Receipt>, anchors: Readonl
   });
   const okSeqs = checks.filter((c) => c.ok).map((c) => c.seq);
   const coveredUpTo = okSeqs.length ? Math.max(...okSeqs) : null;
-  return { ok: chain.ok && checks.every((c) => c.ok), coveredUpTo, anchors: checks, chain };
+  return { ok: chain.ok && checks.every((c) => c.ok), coveredUpTo, anchors: checks, chain, stream };
 }

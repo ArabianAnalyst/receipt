@@ -111,19 +111,21 @@ A chain in your own hands is tamper-evident to you and meaningless to everyone e
 import { RekorV2, P256Signer, verifyAnchored, PostgresAnchorStore } from "@olurabian/receipt/anchor";
 
 const signer = P256Signer.fromPem(readFileSync(process.env.WITNESS_KEY_FILE, "utf8"));
-const rekor = new RekorV2({ url: process.env.REKOR_URL, logKeys: [{ origin: "log2025-1.rekor.sigstore.dev", publicKey: process.env.REKOR_LOG_KEY }] });
+// REKOR_LOG_KEY is <origin>=<base64 DER>
+const [origin, logKey] = process.env.REKOR_LOG_KEY.split("=");
+const rekor = new RekorV2({ url: process.env.REKOR_URL, logKeys: [{ origin, publicKey: logKey }] });
 const anchor = await rekor.submit("purse", records.length - 1, records.at(-1).hash, signer);   // verified before it returns
 await anchors.append(anchor);
 
 const result = verifyAnchored(records, await anchors.list("purse"), { logKeys: [...], witnessKeys: [signer.publicKeyDer()] });
-// { ok, coveredUpTo, anchors: [{ seq, ok, reason?, logIndex, cosigned }], chain }
+// { ok, coveredUpTo, anchors: [{ seq, ok, reason?, logIndex, cosigned }], chain, stream }
 ```
 
-What an anchor proves. Everything at or below `coveredUpTo` is what it was when the log recorded the head. A rewrite there breaks the anchor and is named by seq. A truncation there is a missing record and is named too. Above `coveredUpTo` the chain is tamper-evident only. Order is proven by the log index. Wall-clock time is not, the `at` field is the witness clock. Read `ok` first, because `coveredUpTo` reports the highest anchor that verified on its own and a broken chain below it still makes `ok` false.
+What an anchor proves. Everything at or below `coveredUpTo` is what it was when the log recorded the head. A rewrite there breaks the anchor and is named by seq. A truncation there is a missing record and is named too. Above `coveredUpTo` the chain is tamper-evident only. Order is proven by the log index. Wall-clock time is not, the `at` field is the witness clock. Read `ok` first, because a break anywhere in the chain, not only at or below `coveredUpTo`, makes `ok` false. `ok` true with `coveredUpTo` null means nothing was ever anchored, and the command line exits 1 for that reason alone.
 
 The two keys you pin. This package ships neither.
 
-1. The log key. In the `sigstore/root-signing` repository, `targets/trusted_root.json`, the `tlogs` entry whose `baseUrl` is your `REKOR_URL`, field `publicKey.rawBytes`. Its C2SP key id, `checkpointKeyId(origin, key)`, must equal the `logId.keyId` a reply carries.
+1. The log key. In the `sigstore/root-signing` repository, `targets/trusted_root.json`, the `tlogs` entry whose `baseUrl` is your `REKOR_URL`, field `publicKey.rawBytes`. Its C2SP key id, `checkpointKeyId(origin, key)`, must equal the `logId.keyId` a reply carries. That trust root entry also carries `validFor`, the window the key is good for, which is what lets an anchor made under a since-rotated key still verify.
 2. The witness key. The witness prints its public key on first run and serves it on `GET /`. Pin it the way you pin an SSH host key. A rotated witness is a new key; old anchors stay valid under the old one.
 
 The verifier from the command line, with the chain from the broker's audit endpoint and the anchors from a witness.
@@ -131,9 +133,12 @@ The verifier from the command line, with the chain from the broker's audit endpo
 ```sh
 npx receipt-verify chain.jsonl --anchors https://witness.example.com \
   --log-key log2025-1.rekor.sigstore.dev=<base64 DER> \
-  --witness-key <base64 DER>
+  --witness-key <base64 DER> \
+  --stream purse
 ```
 
-Exit 0 when `ok`, 1 when the chain or an anchor fails, 2 on a usage or read error. The public instance's URL rotates by year, so configure it, never compile it in. Only Ed25519 log keys are supported for checkpoints in this version.
+`--stream` is optional and binds the check to that stream, so an anchor from another stream fails loudly instead of silently passing on its own. Omit it and every anchor still has to agree on one stream.
+
+Exit 0 when `ok` and at least one anchor verified, 1 when the chain fails, an anchor fails, or nothing anchored at all, 2 on a usage or read error. The public instance's URL rotates by year, so configure it, never compile it in. Only Ed25519 log keys are supported for checkpoints in this version.
 
 Part of [Deadlatch](https://deadlatch.dev), enforce, prove, watch. MIT.

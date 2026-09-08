@@ -22,6 +22,14 @@ test("P256Signer signs an artifact that verifyArtifactSignature accepts, and rej
   assert.ok(!verifyArtifactSignature(artifact, "not base64!!", s.publicKeyDer()));
 });
 
+test("verifyArtifactSignature rejects a P-384 public key", async () => {
+  const { generateKeyPairSync } = await import("node:crypto");
+  const { publicKey } = generateKeyPairSync("ec", { namedCurve: "P-384" });
+  const der = new Uint8Array(publicKey.export({ type: "spki", format: "der" }));
+  const artifact = artifactOf("purse", 3, HEAD);
+  assert.equal(verifyArtifactSignature(artifact, toBase64(new Uint8Array([1, 2, 3])), toBase64(der)), false);
+});
+
 test("P256Signer round-trips through PEM and refuses a non P-256 key", async () => {
   const s = P256Signer.generate();
   const back = P256Signer.fromPem(s.toPem());

@@ -50,3 +50,26 @@ test("receipt-verify exits 2 with usage when a key is missing", () => {
   const f = files();
   assert.throws(() => run([f.chain, "--anchors", f.anchors]), (e: unknown) => (e as { status: number }).status === 2);
 });
+
+test("receipt-verify exits 1 with a stderr note when no anchor was given at all", () => {
+  const f = files();
+  const empty = join(f.dir, "empty.json");
+  writeFileSync(empty, JSON.stringify({ anchors: [] }));
+  let code = 0; let stdout = ""; let stderr = "";
+  try { stdout = run([f.chain, "--anchors", empty, "--log-key", `${f.log.origin}=${f.log.publicKeyDer}`, "--witness-key", f.signer.publicKeyDer()]); }
+  catch (e) { const err = e as { status: number; stdout: string; stderr: string }; code = err.status; stdout = err.stdout; stderr = err.stderr; }
+  assert.equal(code, 1);
+  assert.match(stdout, /"ok": true/);
+  assert.match(stderr, /receipt-verify: no anchor verified, the chain is tamper-evident only/);
+});
+
+test("receipt-verify exits 2 when the anchors file is neither an array nor an anchors object", () => {
+  const f = files();
+  const bad = join(f.dir, "bad-anchors.json");
+  writeFileSync(bad, JSON.stringify({ items: [] }));
+  let code = 0; let stderr = "";
+  try { run([f.chain, "--anchors", bad, "--log-key", `${f.log.origin}=${f.log.publicKeyDer}`, "--witness-key", f.signer.publicKeyDer()]); }
+  catch (e) { const err = e as { status: number; stderr: string }; code = err.status; stderr = err.stderr; }
+  assert.equal(code, 2);
+  assert.match(stderr, /anchors: expected an array or an object with an anchors array/);
+});

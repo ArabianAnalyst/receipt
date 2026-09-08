@@ -37,3 +37,8 @@ test("bytes helpers round-trip and compare", () => {
   assert.ok(!bytesEqual(a, new Uint8Array([1, 2])));
   assert.deepEqual(concat(new Uint8Array([1]), new Uint8Array([2, 3])), a);
 });
+
+test("bytesEqual rejects a length mismatch in either order", () => {
+  assert.equal(bytesEqual(new Uint8Array([1, 2]), new Uint8Array([1, 2, 3])), false);
+  assert.equal(bytesEqual(new Uint8Array([1, 2, 3]), new Uint8Array([1, 2])), false);
+});

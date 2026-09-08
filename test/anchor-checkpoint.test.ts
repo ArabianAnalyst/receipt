@@ -69,3 +69,28 @@ test("parseCheckpoint throws on notes that are not notes", () => {
   assert.throws(() => parseCheckpoint("o\n5\nr\n\nnot a signature\n"), /signature line/);
   assert.throws(() => parseCheckpoint("o\n5\nr\n\n"), /no signatures/);
 });
+
+test("a note whose only signature line is by a cosigner name fails with the named reason", () => {
+  const line = toBase64(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9]));
+  const note = `o\n5\nr\n\n— cosigner ${line}\n`;
+  const r = verifyCheckpoint(note, [{ origin: "o", publicKey: fixtureLogKey.publicKey }]);
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, "checkpoint: no signature by the origin");
+});
+
+test("parseCheckpoint throws on malformed text, a size that is not decimal", () => {
+  assert.throws(() => parseCheckpoint("o\nx\nr\n\n— o AAAAAAAA\n"), /malformed text/);
+});
+
+test("parseCheckpoint throws when a signature line's base64 decodes to fewer than five bytes", () => {
+  const short = toBase64(new Uint8Array([1, 2, 3, 4]));
+  assert.throws(() => parseCheckpoint(`o\n5\nr\n\n— o ${short}\n`), /signature too short/);
+});
+
+test("verifyCheckpoint tries every trusted key for the origin, not just the first", () => {
+  const { publicKey } = generateKeyPairSync("ed25519");
+  const wrongKeySameOrigin = { origin: FIXTURE_ORIGIN, publicKey: toBase64(new Uint8Array(publicKey.export({ type: "spki", format: "der" }))) };
+  const r = verifyCheckpoint(note(), [wrongKeySameOrigin, fixtureLogKey]);
+  assert.equal(r.ok, true, r.reason);
+  assert.equal(r.keyId, fixtureLogId);
+});

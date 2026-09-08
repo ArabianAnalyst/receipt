@@ -47,6 +47,8 @@ export interface AnchoredVerifyResult {
   coveredUpTo: number | null;
   anchors: AnchorCheck[];
   chain: VerifyResult;
+  /** The stream the check ran against, opts.stream or the anchors' shared stream, null when there are no anchors. */
+  stream: string | null;
 }
 
 /** Append-only by contract. Nothing in this package updates or deletes an anchor. */

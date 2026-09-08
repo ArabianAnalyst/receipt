@@ -8,7 +8,7 @@ const args = process.argv.slice(2);
 
 function usage(): never {
   process.stderr.write(
-    "receipt-verify <chain.json | chain.jsonl> --anchors <file | witness url> --log-key <origin>=<base64 DER> [--log-key ...] --witness-key <base64 DER> [--witness-key ...]\n",
+    "receipt-verify <chain.json | chain.jsonl> --anchors <file | witness url> --log-key <origin>=<base64 DER> [--log-key ...] --witness-key <base64 DER> [--witness-key ...] [--stream <name>]\n",
   );
   process.exit(2);
 }
@@ -18,6 +18,7 @@ const values = (name: string): string[] => args.flatMap((a, i) => (a === name &&
 
 const chainFile = positional[0];
 const anchorsArg = values("--anchors")[0];
+const streamArg = values("--stream")[0];
 if (!chainFile || !anchorsArg || args.includes("--help") || args.includes("-h")) usage();
 
 const trust: AnchorTrust = {
@@ -39,20 +40,28 @@ function readRecords(file: string): Receipt[] {
 async function readAnchors(src: string): Promise<Anchor[]> {
   let text: string;
   if (/^https?:\/\//.test(src)) {
-    const res = await fetch(src.replace(/\/+$/, "") + "/anchors");
+    const res = await fetch(src.replace(/\/+$/, "") + "/anchors", { signal: AbortSignal.timeout(30000) });
     if (!res.ok) throw new Error(`anchors: ${res.status} from ${src}`);
     text = await res.text();
   } else {
     text = readFileSync(src, "utf8");
   }
-  const j = JSON.parse(text) as Anchor[] | { anchors: Anchor[] };
-  return Array.isArray(j) ? j : j.anchors;
+  const j = JSON.parse(text) as unknown;
+  if (Array.isArray(j)) return j as Anchor[];
+  if (j && typeof j === "object" && Array.isArray((j as { anchors?: unknown }).anchors)) {
+    return (j as { anchors: Anchor[] }).anchors;
+  }
+  throw new Error("anchors: expected an array or an object with an anchors array");
 }
 
 async function main(): Promise<void> {
-  const result = verifyAnchored(readRecords(chainFile!), await readAnchors(anchorsArg!), trust);
+  const result = verifyAnchored(readRecords(chainFile!), await readAnchors(anchorsArg!), trust, streamArg ? { stream: streamArg } : undefined);
   process.stdout.write(JSON.stringify(result, null, 2) + "\n");
-  process.exit(result.ok ? 0 : 1);
+  const anchored = result.ok && result.coveredUpTo !== null;
+  if (result.ok && result.coveredUpTo === null) {
+    process.stderr.write("receipt-verify: no anchor verified, the chain is tamper-evident only\n");
+  }
+  process.exitCode = anchored ? 0 : 1;
 }
 
 main().catch((e) => {
