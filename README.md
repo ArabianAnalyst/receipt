@@ -103,4 +103,37 @@ Python's default `json.dumps` differs on two of these. It adds whitespace after 
 
 `verifyChain` walks the chain and reports the index and id of the first receipt that fails, and why.
 
+## Anchoring the head
+
+A chain in your own hands is tamper-evident to you and meaningless to everyone else, because whoever holds the whole log can rebuild it. The `anchor` subpath commits the head to a public transparency log and lets anyone verify the chain against those commitments with nothing from the writer.
+
+```ts
+import { RekorV2, P256Signer, verifyAnchored, PostgresAnchorStore } from "@olurabian/receipt/anchor";
+
+const signer = P256Signer.fromPem(readFileSync(process.env.WITNESS_KEY_FILE, "utf8"));
+const rekor = new RekorV2({ url: process.env.REKOR_URL, logKeys: [{ origin: "log2025-1.rekor.sigstore.dev", publicKey: process.env.REKOR_LOG_KEY }] });
+const anchor = await rekor.submit("purse", records.length - 1, records.at(-1).hash, signer);   // verified before it returns
+await anchors.append(anchor);
+
+const result = verifyAnchored(records, await anchors.list("purse"), { logKeys: [...], witnessKeys: [signer.publicKeyDer()] });
+// { ok, coveredUpTo, anchors: [{ seq, ok, reason?, logIndex, cosigned }], chain }
+```
+
+What an anchor proves. Everything at or below `coveredUpTo` is what it was when the log recorded the head. A rewrite there breaks the anchor and is named by seq. A truncation there is a missing record and is named too. Above `coveredUpTo` the chain is tamper-evident only. Order is proven by the log index. Wall-clock time is not, the `at` field is the witness clock. Read `ok` first, because `coveredUpTo` reports the highest anchor that verified on its own and a broken chain below it still makes `ok` false.
+
+The two keys you pin. This package ships neither.
+
+1. The log key. In the `sigstore/root-signing` repository, `targets/trusted_root.json`, the `tlogs` entry whose `baseUrl` is your `REKOR_URL`, field `publicKey.rawBytes`. Its C2SP key id, `checkpointKeyId(origin, key)`, must equal the `logId.keyId` a reply carries.
+2. The witness key. The witness prints its public key on first run and serves it on `GET /`. Pin it the way you pin an SSH host key. A rotated witness is a new key; old anchors stay valid under the old one.
+
+The verifier from the command line, with the chain from the broker's audit endpoint and the anchors from a witness.
+
+```sh
+npx receipt-verify chain.jsonl --anchors https://witness.example.com \
+  --log-key log2025-1.rekor.sigstore.dev=<base64 DER> \
+  --witness-key <base64 DER>
+```
+
+Exit 0 when `ok`, 1 when the chain or an anchor fails, 2 on a usage or read error. The public instance's URL rotates by year, so configure it, never compile it in. Only Ed25519 log keys are supported for checkpoints in this version.
+
 Part of [Deadlatch](https://deadlatch.dev), enforce, prove, watch. MIT.

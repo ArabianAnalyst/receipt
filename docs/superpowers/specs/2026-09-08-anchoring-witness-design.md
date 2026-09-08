@@ -98,6 +98,11 @@ export function verifyCheckpoint(note: string, logKeys: AnchorTrust["logKeys"]):
 export function checkpointKeyId(origin: string, publicKeyDer: Uint8Array): string;      // base64, C2SP
 export class P256Signer { static generate(): P256Signer; static fromPem(pem: string): P256Signer; toPem(): string; publicKeyDer(): string; sign(bytes: Uint8Array): string }
 export class RekorV2 { constructor(opts: { url: string; logKeys: AnchorTrust["logKeys"]; timeoutMs?: number }); submit(stream: string, seq: number, head: string, signer: P256Signer): Promise<Anchor> }
+export function verifyAnchorProof(anchor: Anchor, trust: AnchorTrust): AnchorCheck;
+export function verifyArtifactSignature(artifact: Uint8Array, signatureB64: string, publicKeyDerB64: string): boolean;
+export function decodeBody(canonicalizedBodyB64: string): HashedRekordBody | null;
+export function buildRequest(digest: Uint8Array, signatureB64: string, publicKeyDerB64: string): RekorRequest;
+export const KEY_DETAILS: "PKIX_ECDSA_P256_SHA_256";
 export interface AnchorStore { append(a: Anchor): Promise<void>; list(stream: string, sinceSeq?: number): Promise<Anchor[]>; last(stream: string): Promise<Anchor | null> }
 export class MemoryAnchorStore implements AnchorStore {}
 export class PostgresAnchorStore implements AnchorStore { constructor(client: SqlClient, opts?: { table?: string }); open(): Promise<void> }
