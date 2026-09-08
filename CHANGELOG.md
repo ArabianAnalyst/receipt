@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0
+## 0.3.0 (2026-09-08)
 
 - New subpath `@olurabian/receipt/anchor`. Anchors a chain head to a Rekor v2 transparency log and verifies a chain against its anchors, `verifyAnchored`, with RFC 6962 inclusion proofs and C2SP checkpoint verification on `node:crypto`. Zero dependencies still.
 - `RekorV2` client that verifies every reply before returning an anchor, `P256Signer` for the witness key, `MemoryAnchorStore` and `PostgresAnchorStore`.
